@@ -1,133 +1,164 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
 import json
 import os
-from datetime import datetime, timedelta
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+import requests
 
-# --- VERİTABANI / DOSYA YÖNETİMİ ---
-DATA_FILE = "data.json"
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"cards": [], "posts": []}
+class AkilliAsistanApp:
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+  def __init__(self, root):
+    self.root = root
+    self.root.title("Akıllı Asistan v1.0")
+    self.root.geometry("650 x 500")
 
-# --- ANA UYGULAMA ---
-class MainApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Akıllı Asistan - Kartlar & Sosyal Medya")
-        self.geometry("700x500")
-        self.data = load_data()
+    # Veri Dosyaları
+    self.cards_file = "flashcards.json"
+    self.cards = self.load_data(self.cards_file)
 
-        # Sekme Yönetimi
-        tab_control = ttk.Notebook(self)
-        
-        self.tab_cards = ttk.Frame(tab_control)
-        self.tab_social = ttk.Frame(tab_control)
-        
-        tab_control.add(self.tab_cards, text=" 🧠 Dil / Sınav Kartları ")
-        tab_control.add(self.tab_social, text=" 📱 Sosyal Medya Planlayıcı ")
-        tab_control.pack(expand=1, fill="both")
+    # Sekme Yapısı (Notebook)
+    self.notebook = ttk.Notebook(self.root)
+    self.notebook.pack(expand=True, fill="both")
 
-        self.setup_cards_tab()
-        self.setup_social_tab()
+    # Sekmeler
+    self.create_flashcard_tab()
+    self.create_ai_chat_tab()
 
-    # --- KARTLAR SEKMESİ ---
-    def setup_cards_tab(self):
-        frame = ttk.LabelFrame(self.tab_cards, text="Yeni Kart Ekle")
-        frame.pack(fill="x", padx=10, pady=5)
+  # --- VERİ İŞLEMLERİ ---
+  def load_data(self, filename):
+    if os.path.exists(filename):
+      try:
+        with open(filename, "r", encoding="utf-8") as f:
+          return json.load(f)
+      except Exception:
+        return []
+    return []
 
-        ttk.Label(frame, text="Ön Yüz (Soru/Kelime):").grid(row=0, column=0, padx=5, pady=5)
-        self.entry_front = ttk.Entry(frame, width=30)
-        self.entry_front.grid(row=0, column=1, padx=5, pady=5)
+  def save_data(self, filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+      json.dump(data, f, ensure_ascii=False, indent=4)
 
-        ttk.Label(frame, text="Arka Yüz (Cevap/Anlam):").grid(row=1, column=0, padx=5, pady=5)
-        self.entry_back = ttk.Entry(frame, width=30)
-        self.entry_back.grid(row=1, column=1, padx=5, pady=5)
+  # --- SEKMELER ---
+  def create_flashcard_tab(self):
+    tab = ttk.Frame(self.notebook)
+    self.notebook.add(tab, text="Öğrenme Kartları")
 
-        btn_add = ttk.Button(frame, text="Ekle", command=self.add_card)
-        btn_add.grid(row=2, column=0, columnspan=2, pady=5)
+    # Kart Ekleme Alanı
+    lbl_q = ttk.Label(tab, text="Soru / Kavram:")
+    lbl_q.pack(anchor="w", padx=10, pady=(10, 0))
 
-        # Kart Listesi
-        self.card_list = tk.Listbox(self.tab_cards, height=10)
-        self.card_list.pack(fill="both", expand=True, padx=10, pady=5)
-        self.refresh_cards()
+    self.entry_q = ttk.Entry(tab, width=50)
+    self.entry_q.pack(fill="x", padx=10, pady=2)
 
-    def add_card(self):
-        front = self.entry_front.get().strip()
-        back = self.entry_back.get().strip()
-        if front and back:
-            new_card = {
-                "front": front,
-                "back": back,
-                "interval": 1,
-                "next_review": str(datetime.now().date())
-            }
-            self.data["cards"].append(new_card)
-            save_data(self.data)
-            self.entry_front.delete(0, tk.END)
-            self.entry_back.delete(0, tk.END)
-            self.refresh_cards()
-            messagebox.showinfo("Başarılı", "Kart eklendi!")
-        else:
-            messagebox.showwarning("Uyarı", "Lütfen tüm alanları doldurun.")
+    lbl_a = ttk.Label(tab, text="Cevap / Açıklama:")
+    lbl_a.pack(anchor="w", padx=10, pady=(5, 0))
 
-    def refresh_cards(self):
-        self.card_list.delete(0, tk.END)
-        for c in self.data["cards"]:
-            self.card_list.insert(tk.END, f"Soru: {c['front']} | Cevap: {c['back']} | Tekrar: {c['next_review']}")
+    self.entry_a = ttk.Entry(tab, width=50)
+    self.entry_a.pack(fill="x", padx=10, pady=2)
 
-    # --- SOSYAL MEDYA SEKMESİ ---
-    def setup_social_tab(self):
-        frame = ttk.LabelFrame(self.tab_social, text="Yeni Gönderi Planla")
-        frame.pack(fill="x", padx=10, pady=5)
+    btn_add = ttk.Button(tab, text="Kart Ekle", command=self.add_card)
+    btn_add.pack(padx=10, pady=10)
 
-        ttk.Label(frame, text="Platform:").grid(row=0, column=0, padx=5, pady=5)
-        self.combo_platform = ttk.Combobox(frame, values=["Instagram", "X (Twitter)", "LinkedIn"])
-        self.combo_platform.current(0)
-        self.combo_platform.grid(row=0, column=1, padx=5, pady=5)
+    # Kart Listesi
+    self.card_listbox = tk.Listbox(tab, height=10)
+    self.card_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+    self.update_card_listbox()
 
-        ttk.Label(frame, text="Gönderi Metni:").grid(row=1, column=0, padx=5, pady=5)
-        self.entry_post_text = ttk.Entry(frame, width=30)
-        self.entry_post_text.grid(row=1, column=1, padx=5, pady=5)
+  def create_ai_chat_tab(self):
+    tab = ttk.Frame(self.notebook)
+    self.notebook.add(tab, text="Çevrim Dışı AI Sohbet")
 
-        btn_add_post = ttk.Button(frame, text="Planla", command=self.add_post)
-        btn_add_post.grid(row=2, column=0, columnspan=2, pady=5)
+    # Sohbet Geçmişi Gösterim Alanı
+    self.chat_display = tk.Text(
+        tab, state="disabled", wrap="word", bg="#f4f4f4", font=("Arial", 10)
+    )
+    self.chat_display.pack(expand=True, fill="both", padx=10, pady=10)
 
-        # Gönderi Listesi
-        self.post_list = tk.Listbox(self.tab_social, height=10)
-        self.post_list.pack(fill="both", expand=True, padx=10, pady=5)
-        self.refresh_posts()
+    # Mesaj Yazma Alanı ve Gönder Butonu
+    input_frame = ttk.Frame(tab)
+    input_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-    def add_post(self):
-        platform = self.combo_platform.get()
-        text = self.entry_post_text.get().strip()
-        if text:
-            new_post = {
-                "platform": platform,
-                "text": text,
-                "status": "Planlandı",
-                "date": str(datetime.now().strftime("%Y-%m-%d %H:%M"))
-            }
-            self.data["posts"].append(new_post)
-            save_data(self.data)
-            self.entry_post_text.delete(0, tk.END)
-            self.refresh_posts()
-            messagebox.showinfo("Başarılı", "Gönderi planlandı!")
-        else:
-            messagebox.showwarning("Uyarı", "Lütfen bir metin girin.")
+    self.msg_entry = ttk.Entry(input_frame)
+    self.msg_entry.pack(side="left", expand=True, fill="x", padx=(0, 5))
+    self.msg_entry.bind("<Return>", lambda event: self.send_ai_message_thread())
 
-    def refresh_posts(self):
-        self.post_list.delete(0, tk.END)
-        for p in self.data["posts"]:
-            self.post_list.insert(tk.END, f"[{p['platform']}] {p['text']} - ({p['status']})")
+    btn_send = ttk.Button(
+        input_frame, text="Gönder", command=self.send_ai_message_thread
+    )
+    btn_send.pack(side="right")
+
+  # --- MANTIKSAL FONKSİYONLAR ---
+  def add_card(self):
+    q = self.entry_q.get().strip()
+    a = self.entry_a.get().strip()
+
+    if not q or not a:
+      messagebox.showwarning("Eksik Bilgi", "Lütfen hem soru hem cevap girin.")
+      return
+
+    self.cards.append({"question": q, "answer": a})
+    self.save_data(self.cards_file, self.cards)
+    self.update_card_listbox()
+
+    self.entry_q.delete(0, tk.END)
+    self.entry_a.delete(0, tk.END)
+
+  def update_card_listbox(self):
+    self.card_listbox.delete(0, tk.END)
+    for idx, card in enumerate(self.cards, start=1):
+      self.card_listbox.insert(
+          tk.END, f"{idx}. Soru: {card['question']} | Cevap: {card['answer']}"
+      )
+
+  # --- AI SOHBET FONKSİYONLARI ---
+  def send_ai_message_thread(self):
+    # Arayüz donmasın diye AI isteğini ayrı bir thread'de çalıştırıyoruz
+    threading.Thread(target=self.send_ai_message, daemon=True).start()
+
+  def send_ai_message(self):
+    user_text = self.msg_entry.get().strip()
+    if not user_text:
+      return
+
+    self.append_to_chat(f"Siz: {user_text}\n")
+    self.msg_entry.delete(0, tk.END)
+
+    try:
+      # Yerel bilgisayarda çalışan Ollama servisine çevrim dışı istek gönderimi
+      response = requests.post(
+          "http://localhost:11434/api/generate",
+          json={
+              "model": "phi3",  # İsteğe bağlı yerel model adı (llama3, phi3 vb.)
+              "prompt": user_text,
+              "stream": False,
+          },
+          timeout=10,
+      )
+
+      if response.status_code == 200:
+        ai_reply = response.json().get("response", "Yanıt alınamadı.")
+        self.append_to_chat(f"Yapay Zeka: {ai_reply}\n\n")
+      else:
+        self.append_to_chat(
+            "Yapay Zeka: Sunucu yanıt verdi ancak model yüklenemedi.\n\n"
+        )
+
+    except requests.exceptions.RequestException:
+      self.append_to_chat(
+          "Yapay Zeka (Çevrim Dışı): Şu anda bilgisayarınızda bir AI"
+          " servisi (ör. Ollama) çalışmıyor. Sohbet edebilmek için arkaplanda"
+          " yerel AI servisini başlatmalısınız.\n\n"
+      )
+
+  def append_to_chat(self, text):
+    self.chat_display.config(state="normal")
+    self.chat_display.insert(tk.END, text)
+    self.chat_display.config(state="disabled")
+    self.chat_display.see(tk.END)
+
 
 if __name__ == "__main__":
-    app = MainApp()
-    app.mainloop()
+  root = tk.Tk()
+  app = AkilliAsistanApp(root)
+  root.mainloop()
